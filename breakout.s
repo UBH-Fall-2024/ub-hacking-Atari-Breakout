@@ -7,7 +7,7 @@ offsetBall:  	.word 0x31D		; starting position for the ball
 
 
 board:  .string "+------------------------------------------------------------+", 0xA, 0xD
-        .string "|                                                            |", 0xA, 0xD
+        .string "||___||___||___||___||___||___||___||___||___||___||___||___||", 0xA, 0xD  ; 59x14 0-indexed
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
@@ -23,6 +23,8 @@ board:  .string "+------------------------------------------------------------+"
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
         .string "+------------------------------------------------------------+", 0xA, 0xD, 0x0
+
+map:
 
 player: 		.string 27, "[14;", 0x32, 0x39, "H", 27, "[40m___", 27, "[3D", 0x00
 ball:			.string 27, "[13;30H", 27, "[40m*", 0x00
@@ -48,8 +50,12 @@ pause:			.byte 0x00
 paddlePos: 	.byte 29 ;--> x position only since y doesnt change
 
 ball_x: 	.byte 30
-ball_y:		.byte 13
+ball_y:		.byte 1
 direction:	.byte 5		; initial direction is downward
+
+numX:		.byte 0x00
+
+prev_move:	.byte 0x02 ; 1 means left, 2 is middle and 3 is right
 
 timer: 		.word 0x000
 
@@ -59,12 +65,15 @@ erasePause:		.string 27, "[18;25H", 27, "[K", 0x00
 pregamePrompt:	.string 27, "[7;10H", 27, "[40mWELCOME TO MANZI's BREAKOUT", 27, "[10;8H", 27, "[40mPRESS 1 TO START OR 'X' TO QUIT", 0x00
 pregameFlag:	.byte 0x00
 
-topRow:        	.string 27, "[2;2H", 27, "[41m|____|", 27, "[2;8H", 27, "[41m|____|", 27, "[2;14H", 27, "[41m|____|", 27, "[2;20H", 27, "[41m|____|", 27, "[2;26H", 27, "[41m|____|", 27, "[2;32H", 27, "[41m|____|", 27, "[2;38H", 27, "[41m|____|", 27, "[2;44H", 27, "[41m|____|", 27, "[2;50H", 27, "[41m|____|", 27, "[2;56H", 27, "[41m|____|", 0x00
-
 nextDown:	.byte 0x04
 nextUp:		.byte 0x01
 
-livesPrompt:	.string 27, "[18;1H", 27, "[41mLives: ", 0x00
+livesPrompt:	.string 27, "[18;1H", 27, "[40mLives: ", 0x33, 0x00
+
+endGamePrompt:	.string 27, "[7;25H", 27, "[40mGAME OVER", 0x00
+
+topRow:        	.string 27, "[2;2H", 27, "[41m      ", 27, "[2;8H", 27, "[41m      ", 27, "[2;14H", 27, "[41m      ", 27, "[2;20H", 27, "[41m      ", 27, "[2;26H", 27, "[41m      ", 27, "[2;32H", 27, "[41m      ", 27, "[2;38H", 27, "[41m      ", 27, "[2;44H", 27, "[41m      ", 27, "[2;50H", 27, "[41m      ", 27, "[2;56H", 27, "[41m      ", 0x00
+
 
     .text
 
@@ -115,6 +124,11 @@ ptr_to_pregamePrompt:	.word pregamePrompt
 ptr_to_pregameFlag:		.word pregameFlag
 ptr_to_nextUp:			.word nextUp
 ptr_to_nextDown:		.word nextDown
+ptr_to_livesPrompt:		.word livesPrompt
+ptr_to_endGamePrompt:	.word endGamePrompt
+ptr_to_prevMove:		.word prev_move
+ptr_to_numX:			.word numX
+
 
 breakout:
     PUSH {r4-r12,lr}            ; Preserve registers to adhere to the AAPCS
@@ -151,7 +165,7 @@ breakout:
     STRB r5, [r4, #0x018]
 
 	MOV r8, #0xB2C0
-	MOVT r8, #0x0048
+	MOVT r8, #0x0040
 	;MOV r8, #0x129B
 	;MOVT r8, #0x0008
     ldr r5, [r4, #0x028]        ; load byte from GPTMTAILR offset
@@ -202,6 +216,13 @@ startGame:
     ldr r0, ptr_to_board        ; prints the board
     BL output_string
 
+    ldr r0, ptr_to_livesPrompt	; displays players lives
+    BL output_string
+
+    ;ldr r0, ptr_to_topRow
+    ;BL output_string
+
+
 gameLoop:
 
 	ldr r0, ptr_to_endgame
@@ -213,8 +234,15 @@ gameLoop:
 
 end:
 
+    ldr r0, ptr_to_endGamePrompt
+    BL output_string
+
+
+
     POP {r4-r12,lr}         	; Restore registers from stack
     MOV pc, lr
+
+
 
 
 UART0_Handler:
@@ -376,6 +404,58 @@ Timer_Handler:
     ldr r0, ptr_to_board        ; prints updated board
     BL output_string
 
+    ;ldr r0, ptr_to_topRow
+    ;BL output_string
+
+    ldr r0, ptr_to_direction
+	LDRB r1, [r0]				; grab the current direction
+
+   	ldr r2, ptr_to_ball_x
+	LDRB r3, [r2]				; grab the balls x position
+
+	CMP r1, #1					; is the ball moving left?
+	IT EQ
+	SUBEQ r3, r3, #1
+	CMP r1, #3					; is the ball moving right?
+	IT EQ
+	ADDEQ r3, r3, #1
+	CMP r1, #4					; is the ball moving left?
+	IT EQ
+	SUBEQ r3, r3, #1
+	CMP r1, #6					; is the ball moving right?
+	IT EQ
+	ADDEQ r3, r3, #1
+	STRB r3, [r2]
+
+	ldr r2, ptr_to_ball_y
+	LDRB r3, [r2]				; grab the balls y position
+
+	CMP r1, #3					; is the ball going up or down?
+	ITE LE
+	ADDLE r3, r3, #1			; if the ball is going up (direction is 1-3), increment the ball height by 1
+	SUBGT r3, r3, #1			; if the ball is going down (direction is 4-6), decrement the ball height by 1
+	STRB r3, [r2]
+
+	ldr r0, ptr_to_livesPrompt
+	LDRB r1, [r0, #19]		; grab lives from lives prompt
+
+    CMP r3, #0				; checks if we reached below the paddle
+    IT LT
+    SUBLT r1, r1, #1		; update lives as neccessary
+    STRB r1, [r0, #19]		; store updated value back in prompt
+
+	MOV r7, #0x00
+
+    CMP r1, #0x30			; if we've reached 0 lives
+    IT EQ
+	MOVEQ r7, #0x01
+
+	ldr r6, ptr_to_endgame
+    STRB r7, [r6]			; end the game
+
+    ldr r0, ptr_to_livesPrompt  ; prints updated lives string
+    BL output_string
+
 leaveTimerHandler:
     POP {r4-r12,lr}             ; Restore registers from stack
     BX lr                       ; Return
@@ -415,6 +495,10 @@ updatePaddleLeft:
 	ldr r0, ptr_to_paddlePos
   	LDRB r1, [r0]
   	SUB r1, r1, #3
+  	STRB r1, [r0]
+
+  	ldr r0, ptr_to_prevMove
+  	MOV r1, #1
   	STRB r1, [r0]
 
 leavePaddleLeft:
@@ -459,6 +543,11 @@ updatePaddleRight:
   	LDRB r1, [r0]
   	ADD r1, r1, #3
   	STRB r1, [r0]
+
+  	ldr r0, ptr_to_prevMove
+  	MOV r1, #3
+  	STRB r1, [r0]
+
 
 leavePaddleRight:
 
@@ -708,21 +797,45 @@ handlePaddleHit:
 	BEQ handleCameFromDown
 
 handleCameFromUp:
-	ldr r0, ptr_to_nextUp			; grab next up direction
+	;ldr r0, ptr_to_nextUp			; grab next up direction
+	;LDRB r1, [r0]
+
+	ldr r0, ptr_to_prevMove
 	LDRB r1, [r0]
+
+	CMP r1, #1
+	IT EQ
+	MOVEQ r1, #3
+	CMP r1, #2
+	IT EQ
+	MOVEQ r1, #2
+	CMP r1, #3
+	IT EQ
+	MOVEQ r1, #1
 
 	ldr r2, ptr_to_direction		; load the ptr to the direction the ball is going
 	STRB r1, [r2]
 
-	CMP r1, #3						; check if we've reached max up direction
-	ITE EQ
-	MOVEQ r1, #1					; if we have, reset back to 1
-	ADDNE r1, r1, #1				; if we haven't, increment by 1
-	STRB r1, [r0]					; store new value
+	;CMP r1, #3						; check if we've reached max up direction
+	;ITE EQ
+	;MOVEQ r1, #1					; if we have, reset back to 1
+	;ADDNE r1, r1, #1				; if we haven't, increment by 1
+	;STRB r1, [r0]					; store new value
 
 	B leaveUpdateBall
 
-handleCameFromDown:
+handleCameFromDown:  				; THIS IS WHEN IT HITS THE BRICK
+	ldr r0, ptr_to_ball_y
+	LDRB r1, [r0]
+	CMP r1, #0
+	BLT handleUnderPaddleHit
+
+	ldr r0, ptr_to_ball_x
+	LDRB r1, [r0]
+
+	BL updateBricks
+
+handleUnderPaddleHit:
 	ldr r0, ptr_to_nextDown			; grab next down direction
 	LDRB r1, [r0]
 
@@ -741,5 +854,115 @@ leaveUpdateBall:
 
     POP {r4-r12,lr}
     MOV pc, lr
+
+
+updateBricks:
+	PUSH {r4-r12, lr}
+
+	; r1 is passed in with the x position
+	ldr r0, ptr_to_board
+	ldr r6, ptr_to_numX
+	LDRB r7, [r6]
+
+	CMP r1, #5
+	BLE handleBrick1
+	CMP r1, #10
+	BLE handleBrick2
+	CMP r1, #15
+	BLE handleBrick3
+	CMP r1, #20
+	BLE handleBrick4
+	CMP r1, #25
+	BLE handleBrick5
+	CMP r1, #30
+	BLE handleBrick6
+	CMP r1, #35
+	BLE handleBrick7
+	CMP r1, #40
+	BLE handleBrick8
+	CMP r1, #45
+	BLE handleBrick9
+	CMP r1, #40
+	BLE handleBrick10
+	CMP r1, #55
+	BLE handleBrick11
+	CMP r1, #60
+	BLE handleBrick12
+
+handleBrick1:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x43]
+	B leaveBricks
+handleBrick2:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x48]
+	B leaveBricks
+
+handleBrick3:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x4D]
+	B leaveBricks
+
+handleBrick4:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x52]
+	B leaveBricks
+
+handleBrick5:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x57]
+	B leaveBricks
+
+handleBrick6:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x5C]
+	B leaveBricks
+
+handleBrick7:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x61]
+	B leaveBricks
+
+handleBrick8:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x66]
+	B leaveBricks
+
+handleBrick9:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x6B]
+	B leaveBricks
+
+handleBrick10:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x70]
+	B leaveBricks
+
+handleBrick11:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x75]
+	B leaveBricks
+
+handleBrick12:
+	MOV r1, #0x58
+	STRB r1, [r0, #0x7A]
+
+leaveBricks:
+	ADD r7, r7, #1
+	STRB r7, [r6]
+
+	ldr r5, ptr_to_endgame
+	LDRB r4, [r5]
+
+	CMP r7, #12
+	IT EQ
+	MOVEQ r4, #0x01
+	STRB r4, [r5]
+
+
+	POP {r4-r12,lr}
+    MOV pc, lr
+
+
 
     .end
