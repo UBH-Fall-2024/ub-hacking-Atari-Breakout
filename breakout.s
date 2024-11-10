@@ -2,6 +2,7 @@
 
     .global board
 
+offset:  .word 0x35C
 
 board:  .string "+------------------------------------------------------------+", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
@@ -16,15 +17,16 @@ board:  .string "+------------------------------------------------------------+"
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
-        .string "|                                                            |", 0xA, 0xD
+        .string "|                           ___                              |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
         .string "|                                                            |", 0xA, 0xD
         .string "+------------------------------------------------------------+", 0xA, 0xD, 0x0
 
-posX:	.byte 0x21 ; starting postion is 33 --> 0x21 since that is the middle of the board
-player: .string 27, "[14;", 0x32, 0x39, "H", "___", 27, "[3D", 0x00
-playerPos1:	.byte 0x33
-playerPos2: .byte 0x33
+player: 		.string 27, "[14;", 0x32, 0x39, "H", 27, "[40m___", 27, "[3D", 0x00
+ball:			.string 27, "[13;30H", 27, "[40m*", 0x00
+clearball:		.string 27, "[13;30H", 27, "[40m ", 0x00
+playerPos1:		.byte 0x33
+playerPos2: 	.byte 0x33
 hideCursor: 	.string 27, "[?25l", 0x00
 showCursor: 	.string 27, "[?25H", 0x00
 restoreCursor:  .string 27, "[u", 0x0
@@ -38,6 +40,15 @@ clearPlayer: 	.string 27, "[K", 0x00
 restoreBorder: 	.string 27, "[14;62H", "|", 0x00
 
 endgame:		.byte 0x00
+
+
+paddlePos: 	.byte 29 ;--> x position only since y doesnt change
+
+ball_x: 	.byte 30
+ball_y:		.byte 13
+direction:	.byte 5		; initial direction is downward
+
+topRow:        .string 27, "[2;2H", 27, "[41m|____|", 27, "[2;8H", 27, "[41m|____|", 27, "[2;14H", 27, "[41m|____|", 27, "[2;20H", 27, "[41m|____|", 27, "[2;26H", 27, "[41m|____|", 27, "[2;32H", 27, "[41m|____|", 27, "[2;38H", 27, "[41m|____|", 27, "[2;44H", 27, "[41m|____|", 27, "[2;50H", 27, "[41m|____|", 27, "[2;56H", 27, "[41m|____|", 0x00
 
     .text
 
@@ -62,7 +73,6 @@ ptr_to_board:           .word board
 ptr_to_player:			.word player
 ptr_to_hideCursor:		.word hideCursor
 ptr_to_showCursor:		.word showCursor
-ptr_to_posX:			.word posX
 ptr_to_playerPos1:		.word playerPos1
 ptr_to_playerPos2:		.word playerPos2
 ptr_to_foward:			.word cursorForward
@@ -72,7 +82,13 @@ ptr_to_restoreBorder:	.word restoreBorder
 ptr_to_saveCursor:		.word saveCursor
 ptr_to_restoreCursor:	.word restoreCursor
 ptr_to_endgame:			.word endgame
-
+ptr_to_topRow:			.word topRow
+ptr_to_ball_x:			.word ball_x
+ptr_to_ball_y:			.word ball_y
+ptr_to_paddlePos:		.word paddlePos
+ptr_to_ball:			.word ball
+ptr_to_clearball:		.word clearball
+ptr_to_offset:			.word offset
 
 breakout:
     PUSH {r4-r12,lr}            ; Preserve registers to adhere to the AAPCS
@@ -108,10 +124,10 @@ breakout:
     ORR r5, r5, #0x01           ; write a '1' to TATOIM
     STRB r5, [r4, #0x018]
 
-    MOV r8, #0x2400
-    MOVT r8, #0x00F4
+	MOV r8, #0x1200
+	MOVT r8, #0x007A
     ldr r5, [r4, #0x028]        ; load byte from GPTMTAILR offset
-    MOV r5, r8                  ; store 16,000,000 for the interval  <-- timer interrupt frequency is here
+    MOV r5, r8                  ; store 1,333,600 for the interval  <-- timer interrupt frequency is here
     str r5, [r4, #0x028]
 
     MOV r4, #0xE000             ; load EN0 base address
@@ -139,8 +155,16 @@ breakout:
     ldr r0, ptr_to_board        ; prints the board
     BL output_string
 
-    ldr r0, ptr_to_player       ; moves cursor to position adn displays player
+    ldr r0, ptr_to_topRow
     BL output_string
+
+	ldr r0, ptr_to_ball
+    BL output_string
+
+    ldr r0, ptr_to_player       ; moves cursor to position and displays player
+    BL output_string
+
+
 
 gameLoop:
 
@@ -184,7 +208,7 @@ check_d:
     CMP r10, #100               	; is read_character == 'd'
     BNE check_a
 
-	BL moveRight
+	BL updatePaddleRight
 
     B leaveUartHandler
 
@@ -193,7 +217,7 @@ check_a:
     CMP r10, #97                	; is read_character == 'a'
     BNE leaveUartHandler
 
-    BL moveLeft
+    BL updatePaddleLeft
 
 
 
@@ -230,155 +254,99 @@ Timer_Handler:
     STRB r5, [r4, #0x024]
 
 
+    MOV r0, #0xC
+    BL output_character         ; clear previous board
+
+    ldr r0, ptr_to_board        ; prints the board
+    BL output_string
+
     POP {r4-r12,lr}             ; Restore registers from stack
     BX lr                       ; Return
 
-
-moveLeft:
-    PUSH {r4-r12,lr}
-
-    ldr r0, ptr_to_player
-    LDRB r4, [r0, #5]			; load first digit of position into memory
-    LDRB r5, [r0, #6]			; load second digit of position into memory
-
-	MOV r6, r5					; store second digit temporarily
-
-	SUB r6, r6, #3				; perform the expected movement
-
-    CMP r6, #0x30				; have we reached 0 digit
-    BLT handleSecondZeroDigit
-    SUB r5, r5, #3				; decrement position by 3 since player length is 3
-    STRB r5, [r0, #6]			; update players second byte position in memory
-
-	ldr r0, ptr_to_clearPlayer
-	BL output_string
-
-    ldr r0, ptr_to_player		; update player ansi escape string
-   	BL output_string
-
-   	ldr r0, ptr_to_saveCursor
-   	BL output_string
-
-    ldr r0, ptr_to_restoreBorder
-    BL output_string
-
-    ldr r0, ptr_to_restoreCursor
-   	BL output_string
-
-	B leaveMoveLeft
-
-handleSecondZeroDigit:
-	CMP r4, #0x30			; is the first digit greater than 0
-	BEQ leaveMoveLeft
-
-	SUB r4, r4, #0x01
-
-	CMP r5, #0x30			; is the second digit 0?
-	IT EQ					; if so,
-	MOVEQ r5, #0x37			; we can move 7 into that spot
-
-	CMP r5, #0x31			; is the second digit 1?
-	IT EQ
-	MOVEQ r5, #0x38			; move 8 into that spot
-
-	CMP r5, #0x32
-	IT EQ
-	MOVEQ r5, #0x39			; move 9 into that spot
-
-	ldr r0, ptr_to_clearPlayer	; clear previous position
-	BL output_string
-
-	ldr r0, ptr_to_player		; update player ansi escape string
-	STRB r4, [r0, #5]			; store byte
-    STRB r5, [r0, #6]			; store byte
-    BL output_string			; display new player position
-
-   	ldr r0, ptr_to_saveCursor
-   	BL output_string
-
-    ldr r0, ptr_to_restoreBorder
-    BL output_string
-
-    ldr r0, ptr_to_restoreCursor
-   	BL output_string
-
-leaveMoveLeft:
-    POP {r4-r12,lr}
-    MOV pc, lr
-
-
-moveRight:
+updatePaddleLeft:
   	PUSH {r4-r12,lr}
 
-    ldr r0, ptr_to_player
-    LDRB r4, [r0, #5]			; load first digit of position into memory
-    LDRB r5, [r0, #6]			; load second digit of position into memory
+  	ldr r0, ptr_to_paddlePos
+  	LDRB r1, [r0]
 
-	MOV r6, r5					; store second digit temporarily
+  	SUB r1, r1, #3
+  	CMP r1, #1
+	BLT leavePaddleLeft
 
-	ADD r6, r6, #3				; perform the expected movement
+	ldr r7, ptr_to_offset		; address where the paddle position is stored
+	LDRH r6, [r7]
 
-    CMP r6, #0x39				; have we reached digit
-    BHI handleSecondZeroDigit2
-    ADD r5, r5, #3				; increment position by 3 since player length is 3
-    STRB r5, [r0, #6]			; update players second byte position in memory
+    ldr r0, ptr_to_board		; find the specific part in memory where the paddle is
+    MOV r1, #0x20
+    ADD r0, r0, r6
+	STRB r1, [r0], #1
+    STRB r1, [r0], #1
+    STRB r1, [r0]
 
-	ldr r0, ptr_to_clearPlayer
-	BL output_string
+	SUB r0, r0, #5
+	MOV r1, #0x5F
+	STRB r1, [r0], #1
+    STRB r1, [r0], #1
+    STRB r1, [r0]
 
-    ldr r0, ptr_to_player		; update player ansi escape string
-   	BL output_string
+	ldr r7, ptr_to_offset		; address where the paddle position is stored
+	LDRH r6, [r7]
 
-   	ldr r0, ptr_to_saveCursor
-   	BL output_string
+	SUB r6, r6, #3
+	STRH r6, [r7]
 
-    ldr r0, ptr_to_restoreBorder
-    BL output_string
+	ldr r0, ptr_to_paddlePos
+  	LDRB r1, [r0]
+  	SUB r1, r1, #3
+  	STRB r1, [r0]
 
-    ldr r0, ptr_to_restoreCursor
-   	BL output_string
+leavePaddleLeft:
 
-	B leaveMoveRight
-
-handleSecondZeroDigit2:
-	CMP r4, #0x35			; if the first digit == 5
-	BEQ leaveMoveRight		; leave bc we cant go higher than 60
-
-	ADD r4, r4, #0x01
-
-	CMP r5, #0x37			; is the second digit 7?
-	IT EQ					; if so,
-	MOVEQ r5, #0x30			; we can move 7 into that spot
-
-	CMP r5, #0x38			; is the second digit 8?
-	IT EQ
-	MOVEQ r5, #0x31			; move 8 into that spot
-
-	CMP r5, #0x39
-	IT EQ
-	MOVEQ r5, #0x32			; move 9 into that spot
-
-	ldr r0, ptr_to_clearPlayer	; clear previous position
-	BL output_string
-
-	ldr r0, ptr_to_player		; update player ansi escape string
-	STRB r4, [r0, #5]			; store byte
-    STRB r5, [r0, #6]			; store byte
-    BL output_string			; display new player position
-
-   	ldr r0, ptr_to_saveCursor
-   	BL output_string
-
-    ldr r0, ptr_to_restoreBorder
-    BL output_string
-
-    ldr r0, ptr_to_restoreCursor
-   	BL output_string
-
-leaveMoveRight:
     POP {r4-r12,lr}
     MOV pc, lr
 
+
+updatePaddleRight:
+  	PUSH {r4-r12,lr}
+
+  	ldr r0, ptr_to_paddlePos
+  	LDRB r1, [r0]
+
+  	ADD r1, r1, #3
+  	CMP r1, #60
+	BGT leavePaddleRight
+
+	ldr r7, ptr_to_offset		; address where the paddle position is stored
+	LDRH r6, [r7]
+
+    ldr r0, ptr_to_board		; find the specific part in memory where the paddle is
+    MOV r1, #0x20
+    ADD r0, r0, r6
+	STRB r1, [r0], #1
+    STRB r1, [r0], #1
+    STRB r1, [r0]
+
+	ADD r0, r0, #1
+	MOV r1, #0x5F
+	STRB r1, [r0], #1
+    STRB r1, [r0], #1
+    STRB r1, [r0]
+
+	ldr r7, ptr_to_offset		; address where the paddle position is stored
+	LDRH r6, [r7]
+
+	ADD r6, r6, #3
+	STRH r6, [r7]
+
+	ldr r0, ptr_to_paddlePos
+  	LDRB r1, [r0]
+  	ADD r1, r1, #3
+  	STRB r1, [r0]
+
+leavePaddleRight:
+
+    POP {r4-r12,lr}
+    MOV pc, lr
 
 
     .end
