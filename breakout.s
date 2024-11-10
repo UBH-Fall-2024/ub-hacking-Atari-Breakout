@@ -50,7 +50,7 @@ pause:			.byte 0x00
 paddlePos: 	.byte 29 ;--> x position only since y doesnt change
 
 ball_x: 	.byte 30
-ball_y:		.byte 1
+ball_y:		.byte 3
 direction:	.byte 5		; initial direction is downward
 
 numX:		.byte 0x00
@@ -68,7 +68,9 @@ pregameFlag:	.byte 0x00
 nextDown:	.byte 0x04
 nextUp:		.byte 0x01
 
-livesPrompt:	.string 27, "[18;1H", 27, "[40mLives: ", 0x33, 0x00
+flag: 		.byte 0x00
+
+livesPrompt:	.string 27, "[18;1H", 27, "[40mLives: ", 0x36, 0x00
 
 endGamePrompt:	.string 27, "[7;25H", 27, "[40mGAME OVER", 0x00
 
@@ -128,7 +130,7 @@ ptr_to_livesPrompt:		.word livesPrompt
 ptr_to_endGamePrompt:	.word endGamePrompt
 ptr_to_prevMove:		.word prev_move
 ptr_to_numX:			.word numX
-
+ptr_to_flag:			.word flag
 
 breakout:
     PUSH {r4-r12,lr}            ; Preserve registers to adhere to the AAPCS
@@ -164,7 +166,7 @@ breakout:
     ORR r5, r5, #0x01           ; write a '1' to TATOIM
     STRB r5, [r4, #0x018]
 
-	MOV r8, #0xB2C0
+	MOV r8, #0x8000
 	MOVT r8, #0x0040
 	;MOV r8, #0x129B
 	;MOVT r8, #0x0008
@@ -407,52 +409,6 @@ Timer_Handler:
     ;ldr r0, ptr_to_topRow
     ;BL output_string
 
-    ldr r0, ptr_to_direction
-	LDRB r1, [r0]				; grab the current direction
-
-   	ldr r2, ptr_to_ball_x
-	LDRB r3, [r2]				; grab the balls x position
-
-	CMP r1, #1					; is the ball moving left?
-	IT EQ
-	SUBEQ r3, r3, #1
-	CMP r1, #3					; is the ball moving right?
-	IT EQ
-	ADDEQ r3, r3, #1
-	CMP r1, #4					; is the ball moving left?
-	IT EQ
-	SUBEQ r3, r3, #1
-	CMP r1, #6					; is the ball moving right?
-	IT EQ
-	ADDEQ r3, r3, #1
-	STRB r3, [r2]
-
-	ldr r2, ptr_to_ball_y
-	LDRB r3, [r2]				; grab the balls y position
-
-	CMP r1, #3					; is the ball going up or down?
-	ITE LE
-	ADDLE r3, r3, #1			; if the ball is going up (direction is 1-3), increment the ball height by 1
-	SUBGT r3, r3, #1			; if the ball is going down (direction is 4-6), decrement the ball height by 1
-	STRB r3, [r2]
-
-	ldr r0, ptr_to_livesPrompt
-	LDRB r1, [r0, #19]		; grab lives from lives prompt
-
-    CMP r3, #0				; checks if we reached below the paddle
-    IT LT
-    SUBLT r1, r1, #1		; update lives as neccessary
-    STRB r1, [r0, #19]		; store updated value back in prompt
-
-	MOV r7, #0x00
-
-    CMP r1, #0x30			; if we've reached 0 lives
-    IT EQ
-	MOVEQ r7, #0x01
-
-	ldr r6, ptr_to_endgame
-    STRB r7, [r6]			; end the game
-
     ldr r0, ptr_to_livesPrompt  ; prints updated lives string
     BL output_string
 
@@ -606,6 +562,10 @@ handle1:
 	SUB r3, r3, #0x41
 	STRH r3, [r2]				; store new value
 
+	BL updateX
+	BL updateY
+
+
 	B leaveUpdateBall
 handle2:
 	LDRB r0, [r5, #-0x40]	; grabs location right above the ball
@@ -630,6 +590,10 @@ handle2:
 	LDRH r3, [r2]
 	SUB r3, r3, #0x40
 	STRH r3, [r2]
+
+	BL updateX
+	BL updateY
+
 
 	B leaveUpdateBall
 handle3:
@@ -659,6 +623,10 @@ handle3:
 	SUB r3, r3, #0x3F
 	STRH r3, [r2]
 
+	BL updateX
+	BL updateY
+
+
 	B leaveUpdateBall
 handle4:
 	LDRB r0, [r5, #0x3F]	; bottom left of the ball
@@ -687,6 +655,10 @@ handle4:
 	ADD r3, r3, #0x3F
 	STRH r3, [r2]
 
+	BL updateX
+	BL updateY
+
+
 	B leaveUpdateBall
 handle5:
 	LDRB r0, [r5, #0x40]	;grabs the byte directly below ball
@@ -711,6 +683,10 @@ handle5:
 	LDRH r3, [r2]
 	ADD r3, r3, #0x40
 	STRH r3, [r2]
+
+	BL updateX
+	BL updateY
+
 
 	B leaveUpdateBall
 handle6:
@@ -739,6 +715,9 @@ handle6:
 	LDRH r3, [r2]
 	ADD r3, r3, #0x41
 	STRH r3, [r2]
+
+	BL updateX
+	BL updateY
 
 	B leaveUpdateBall
 
@@ -797,9 +776,6 @@ handlePaddleHit:
 	BEQ handleCameFromDown
 
 handleCameFromUp:
-	;ldr r0, ptr_to_nextUp			; grab next up direction
-	;LDRB r1, [r0]
-
 	ldr r0, ptr_to_prevMove
 	LDRB r1, [r0]
 
@@ -816,18 +792,12 @@ handleCameFromUp:
 	ldr r2, ptr_to_direction		; load the ptr to the direction the ball is going
 	STRB r1, [r2]
 
-	;CMP r1, #3						; check if we've reached max up direction
-	;ITE EQ
-	;MOVEQ r1, #1					; if we have, reset back to 1
-	;ADDNE r1, r1, #1				; if we haven't, increment by 1
-	;STRB r1, [r0]					; store new value
-
 	B leaveUpdateBall
 
 handleCameFromDown:  				; THIS IS WHEN IT HITS THE BRICK
 	ldr r0, ptr_to_ball_y
 	LDRB r1, [r0]
-	CMP r1, #0
+	CMP r1, #2
 	BLT handleUnderPaddleHit
 
 	ldr r0, ptr_to_ball_x
@@ -836,8 +806,17 @@ handleCameFromDown:  				; THIS IS WHEN IT HITS THE BRICK
 	BL updateBricks
 
 handleUnderPaddleHit:
-	ldr r0, ptr_to_nextDown			; grab next down direction
-	LDRB r1, [r0]
+	;ldr r0, ptr_to_nextDown			; grab next down direction
+	;LDRB r1, [r0]
+
+	ldr r0, ptr_to_timer
+	ldr r1, [r0]
+	MOV r0, r1
+	MOV r1, #3
+
+	BL div_and_mod
+
+	ADD r1, r1, #4
 
 	ldr r2, ptr_to_direction		; load the ptr to the direction the ball is going
 	STRB r1, [r2]
@@ -859,7 +838,6 @@ leaveUpdateBall:
 updateBricks:
 	PUSH {r4-r12, lr}
 
-	; r1 is passed in with the x position
 	ldr r0, ptr_to_board
 	ldr r6, ptr_to_numX
 	LDRB r7, [r6]
@@ -963,6 +941,83 @@ leaveBricks:
 	POP {r4-r12,lr}
     MOV pc, lr
 
+
+updateX:
+	PUSH {r4-r12, lr}
+    ldr r0, ptr_to_direction
+	LDRB r1, [r0]				; grab the current direction
+
+   	ldr r2, ptr_to_ball_x
+	LDRB r3, [r2]				; grab the balls x position
+
+	CMP r1, #1					; is the ball moving left?
+	IT EQ
+	SUBEQ r3, r3, #1
+	CMP r1, #3					; is the ball moving right?
+	IT EQ
+	ADDEQ r3, r3, #1
+	CMP r1, #4					; is the ball moving left?
+	IT EQ
+	SUBEQ r3, r3, #1
+	CMP r1, #6					; is the ball moving right?
+	IT EQ
+	ADDEQ r3, r3, #1
+	STRB r3, [r2]
+
+	POP {r4-r12,lr}
+    MOV pc, lr
+
+
+updateY:
+	PUSH {r4-r12, lr}
+    ldr r0, ptr_to_direction
+	LDRB r1, [r0]				; grab the current direction
+
+	ldr r2, ptr_to_ball_y
+	LDRB r3, [r2]				; grab the balls y position
+
+	CMP r1, #3					; is the ball going up or down?
+	ITE LE
+	ADDLE r3, r3, #1			; if the ball is going up (direction is 1-3), increment the ball height by 1
+	SUBGT r3, r3, #1			; if the ball is going down (direction is 4-6), decrement the ball height by 1
+	STRB r3, [r2]
+
+	;ldr r6, ptr_to_flag
+	;LDRB r1, [r6]
+	;CMP r1, #1
+	;BEQ next
+
+	ldr r0, ptr_to_livesPrompt
+	LDRB r1, [r0, #19]		; grab lives from lives prompt
+
+    CMP r3, #2				; checks if we reached below the paddle
+    ITT EQ
+    SUBEQ r1, r1, #1		; update lives as neccessary
+    MOVEQ r5, #0x01
+    STRB r1, [r0, #19]		; store updated value back in prompt
+
+
+	;ldr r6, ptr_to_flag
+	;LDRB r8, [r6]
+    ;EOR r8, r5, r8
+
+    ;ldr r0, ptr_to_flag
+	;STRB r8, [r0]
+
+next:
+
+
+	MOV r7, #0x00
+
+    CMP r1, #0x30			; if we've reached 0 lives
+    IT EQ
+	MOVEQ r7, #0x01
+
+	ldr r6, ptr_to_endgame
+    STRB r7, [r6]			; end the game
+
+	POP {r4-r12,lr}
+    MOV pc, lr
 
 
     .end
