@@ -1,6 +1,6 @@
 # Atari Breakout Game Clone (ARM Assembly)
 
-### Hackathon Project - November 2023
+### Hackathon Project - November 2024
 
 This repository contains the code for a fully functional Atari Breakout game clone, written in ARM assembly language for the Tiva C microcontroller. The game simulates the classic 1976 Atari Breakout, where the player controls a paddle to bounce a ball into bricks, aiming to eliminate all bricks to win the game.
 
